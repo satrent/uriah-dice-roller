@@ -1,0 +1,16 @@
+{
+  "name": "uriahs-dice-roller-server",
+  "version": "1.0.0",
+  "description": "Backend server for Uriah's Dice Roller",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2",
+    "socket.io": "^4.7.5"
+  }
+}
+

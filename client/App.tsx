@@ -3,7 +3,7 @@ import { io, Socket } from 'socket.io-client';
 import { DieType, Roll, User, RolledDiceGroup } from './types';
 import { DICE_OPTIONS } from './constants';
 
-const SOCKET_SERVER_URL = 'http://localhost:3001';
+const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
 
 // --- HELPER FUNCTIONS ---
 const rollDie = (sides: DieType): number => Math.floor(Math.random() * sides) + 1; // Kept for animation only

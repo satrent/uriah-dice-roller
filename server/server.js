@@ -10,12 +10,12 @@ app.use(cors());
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: {
-    origin: "*", // Allow all origins for simplicity. For production, restrict this.
+    origin: process.env.CORS_ORIGIN || "*", // Set CORS_ORIGIN in production
     methods: ["GET", "POST"]
   }
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 
 // --- In-Memory Session Storage ---
 const sessions = {};
