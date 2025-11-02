@@ -14,8 +14,6 @@ export interface Roll {
   groups: RolledDiceGroup[];
   total: number;
   timestamp: number;
-  description?: string;
-  isGeneratingDescription?: boolean;
 }
 
 export interface SavedCombination {

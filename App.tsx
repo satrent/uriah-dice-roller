@@ -2,7 +2,6 @@ import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { io, Socket } from 'socket.io-client';
 import { DieType, Roll, User, RolledDiceGroup } from './types';
 import { DICE_OPTIONS } from './constants';
-import { describeRoll } from './services/geminiService';
 
 const SOCKET_SERVER_URL = 'http://localhost:3001';
 
@@ -116,8 +115,12 @@ function App() {
   const [tableGroups, setTableGroups] = useState<TableDiceGroup[]>([]);
   const [isRolling, setIsRolling] = useState(false);
   const [rollingDice, setRollingDice] = useState<Partial<Record<DieType, number>> | null>(null);
+  const rollStartTimeRef = useRef<number | null>(null);
+  const isRollingRef = useRef(false);
+  const pendingRollRef = useRef<Roll | null>(null);
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     const socket = io(SOCKET_SERVER_URL);
@@ -131,12 +134,55 @@ function App() {
 
     socket.on('user_list_updated', (updatedUsers) => {
       setUsers(updatedUsers);
+      // Ensure our user state is preserved if we're still in the list
+      setUser(prevUser => {
+        if (!prevUser) return prevUser;
+        // Find our user in the updated list to make sure we still have the latest data
+        const updatedSelf = updatedUsers.find(u => u.id === prevUser.id);
+        return updatedSelf || prevUser;
+      });
     });
 
     socket.on('new_roll', (newRoll: Roll) => {
-      setRollLog(prevLog => [newRoll, ...prevLog].slice(0, 50));
-      setIsRolling(false);
-      setRollingDice(null);
+      // Check if this roll is from the current user (who is animating) or from another user
+      const isCurrentUserRoll = user && newRoll.user === user.name && isRollingRef.current;
+      
+      if (isCurrentUserRoll) {
+        // This is our roll - wait for animation to complete
+        pendingRollRef.current = newRoll;
+        
+        // Ensure animation shows for at least 1 second
+        const elapsed = rollStartTimeRef.current ? Date.now() - rollStartTimeRef.current : 0;
+        const minAnimationTime = 1000; // 1 second minimum
+        
+        const finishAnimation = () => {
+          // Add the pending roll to the log first
+          if (pendingRollRef.current) {
+            setRollLog(prevLog => [pendingRollRef.current!, ...prevLog].slice(0, 50));
+            pendingRollRef.current = null;
+          }
+          
+          // Use a small delay to ensure the log update is processed before hiding animation
+          setTimeout(() => {
+            setIsRolling(false);
+            setRollingDice(null);
+            rollStartTimeRef.current = null;
+            isRollingRef.current = false;
+          }, 50);
+        };
+        
+        if (elapsed < minAnimationTime) {
+          const remainingTime = minAnimationTime - elapsed;
+          setTimeout(() => {
+            finishAnimation();
+          }, remainingTime);
+        } else {
+          finishAnimation();
+        }
+      } else {
+        // This is a roll from another user - add it to the log immediately
+        setRollLog(prevLog => [newRoll, ...prevLog].slice(0, 50));
+      }
     });
 
     return () => {
@@ -162,31 +208,29 @@ function App() {
 
     setRollingDice(diceForAnimation);
     setIsRolling(true);
+    isRollingRef.current = true;
+    rollStartTimeRef.current = Date.now();
 
     // Emit the roll event to the server
+    // tableGroups order is preserved - matches the order on the table after drag-and-drop
     socketRef.current?.emit('roll_dice', { tableGroups, sessionID });
 
-    // The server will send back the result via 'new_roll' event
-    // We'll keep the animation for a fixed time on the client for UX
+    // Failsafe: hide animation after 5 seconds if server doesn't respond
     setTimeout(() => {
-      if (isRolling) {
-         setIsRolling(false); // Failsafe to hide animation if server response is lost
+      if (isRollingRef.current) {
+         setIsRolling(false);
          setRollingDice(null);
+         rollStartTimeRef.current = null;
+         isRollingRef.current = false;
+         
+         // If there's a pending roll, add it to the log even if animation was interrupted
+         if (pendingRollRef.current) {
+           setRollLog(prevLog => [pendingRollRef.current!, ...prevLog].slice(0, 50));
+           pendingRollRef.current = null;
+         }
       }
-    }, 2500);
+    }, 5000);
   }
-  
-  const handleDescribeRoll = async (rollId: string) => {
-    setRollLog(prev => prev.map(r => r.id === rollId ? { ...r, isGeneratingDescription: true } : r));
-    
-    const roll = rollLog.find(r => r.id === rollId);
-    if (roll) {
-        const description = await describeRoll(roll);
-        setRollLog(prev => prev.map(r => r.id === rollId ? { ...r, description, isGeneratingDescription: false } : r));
-    } else {
-        setRollLog(prev => prev.map(r => r.id === rollId ? { ...r, isGeneratingDescription: false } : r));
-    }
-  };
 
   const addGroup = (die: DieType) => {
     if (tableGroups.length >= 10) return; // Limit groups on table
@@ -364,7 +408,15 @@ function App() {
                         </span>
                     </p>
                     <p className="text-sm text-slate-400 mt-1">
-                      {roll.groups.map((g, i) => <span key={i} className="mr-2">{`${g.count}d${g.die}:(${g.results.join(',')})`}</span>)}
+                      {roll.groups.map((g, i) => {
+                        const diceSum = g.results.reduce((sum, result) => sum + result, 0);
+                        const groupTotal = diceSum + g.modifier;
+                        return (
+                          <span key={i} className="mr-2">
+                            {`${g.count}d${g.die}:(${g.results.join(',')})${g.modifier !== 0 ? `${g.modifier > 0 ? '+' : ''}${g.modifier}` : ''} = ${groupTotal}`}
+                          </span>
+                        );
+                      })}
                     </p>
                   </div>
                   <div className="text-right flex-shrink-0 ml-4">
@@ -375,15 +427,6 @@ function App() {
                     <p className="text-xs text-slate-500 mt-1">{new Date(roll.timestamp).toLocaleTimeString()}</p>
                   </div>
                 </div>
-                 <div className="mt-2 pt-2 border-t border-slate-700/50">
-                  {roll.description ? (
-                      <p className="text-sm italic text-purple-300">"{roll.description}"</p>
-                  ) : (
-                      <button onClick={() => handleDescribeRoll(roll.id)} disabled={roll.isGeneratingDescription} className="text-xs text-purple-400 hover:text-purple-300 disabled:opacity-50">
-                          {roll.isGeneratingDescription ? 'Describing...' : '✨ Describe with AI'}
-                      </button>
-                  )}
-                  </div>
               </div>
             )})}
           </div>
@@ -394,7 +437,35 @@ function App() {
           <div>
             <h2 className="text-lg font-bold text-cyan-400 mb-3">Session Info</h2>
             <div className="bg-slate-700/50 p-3 rounded-lg">
-              <label className="text-xs font-semibold text-slate-400">SHARE LINK</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-semibold text-slate-400">SHARE LINK</label>
+                <button
+                  onClick={async () => {
+                    const shareLink = `${window.location.origin}${window.location.pathname}#${sessionID}`;
+                    try {
+                      await navigator.clipboard.writeText(shareLink);
+                      setLinkCopied(true);
+                      setTimeout(() => {
+                        setLinkCopied(false);
+                      }, 2000);
+                    } catch (err) {
+                      console.error('Failed to copy:', err);
+                    }
+                  }}
+                  className="text-slate-400 hover:text-cyan-400 transition-colors"
+                  title={linkCopied ? "Link copied!" : "Copy link to clipboard"}
+                >
+                  {linkCopied ? (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-green-400 transition-opacity duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                    </svg>
+                  ) : (
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 transition-opacity duration-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                    </svg>
+                  )}
+                </button>
+              </div>
               <input readOnly value={`${window.location.origin}${window.location.pathname}#${sessionID}`} className="w-full bg-slate-600 text-xs p-1.5 rounded mt-1 border border-slate-500" />
             </div>
           </div>

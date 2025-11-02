@@ -35,6 +35,7 @@ const USER_COLORS = [
 const rollDie = (sides) => Math.floor(Math.random() * sides) + 1;
 
 const performRoll = (groups) => {
+    // Preserve the order of groups as received from client
     const rolledGroups = [];
     let finalTotal = 0;
 
