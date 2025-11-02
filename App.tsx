@@ -109,6 +109,7 @@ const RollingAnimation: React.FC<{ dice: Partial<Record<DieType, number>> }> = (
 function App() {
   const socketRef = useRef<Socket | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const userRef = useRef<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
   const [sessionID, setSessionID] = useState<string | null>(null);
   const [rollLog, setRollLog] = useState<Roll[]>([]);
@@ -121,6 +122,10 @@ function App() {
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+
+  useEffect(() => {
+    userRef.current = user;
+  }, [user]);
 
   useEffect(() => {
     const socket = io(SOCKET_SERVER_URL);
@@ -145,7 +150,7 @@ function App() {
 
     socket.on('new_roll', (newRoll: Roll) => {
       // Check if this roll is from the current user (who is animating) or from another user
-      const isCurrentUserRoll = user && newRoll.user === user.name && isRollingRef.current;
+      const isCurrentUserRoll = !!(userRef.current && newRoll.user === userRef.current.name && isRollingRef.current);
       
       if (isCurrentUserRoll) {
         // This is our roll - wait for animation to complete
@@ -156,18 +161,21 @@ function App() {
         const minAnimationTime = 1000; // 1 second minimum
         
         const finishAnimation = () => {
-          // Add the pending roll to the log first
-          if (pendingRollRef.current) {
-            setRollLog(prevLog => [pendingRollRef.current!, ...prevLog].slice(0, 50));
-            pendingRollRef.current = null;
-          }
+          // Capture the pending roll before any async operations
+          const rollToAdd = pendingRollRef.current;
           
-          // Use a small delay to ensure the log update is processed before hiding animation
+          // First hide the animation overlay
+          setIsRolling(false);
+          setRollingDice(null);
+          rollStartTimeRef.current = null;
+          isRollingRef.current = false;
+          pendingRollRef.current = null;
+
+          // Then, after a short delay, append the log so it appears post-animation
           setTimeout(() => {
-            setIsRolling(false);
-            setRollingDice(null);
-            rollStartTimeRef.current = null;
-            isRollingRef.current = false;
+            if (rollToAdd) {
+              setRollLog(prevLog => [rollToAdd, ...prevLog].slice(0, 50));
+            }
           }, 50);
         };
         
@@ -218,15 +226,17 @@ function App() {
     // Failsafe: hide animation after 5 seconds if server doesn't respond
     setTimeout(() => {
       if (isRollingRef.current) {
+         const rollToAdd = pendingRollRef.current;
+         
          setIsRolling(false);
          setRollingDice(null);
          rollStartTimeRef.current = null;
          isRollingRef.current = false;
+         pendingRollRef.current = null;
          
          // If there's a pending roll, add it to the log even if animation was interrupted
-         if (pendingRollRef.current) {
-           setRollLog(prevLog => [pendingRollRef.current!, ...prevLog].slice(0, 50));
-           pendingRollRef.current = null;
+         if (rollToAdd) {
+           setRollLog(prevLog => [rollToAdd, ...prevLog].slice(0, 50));
          }
       }
     }, 5000);
@@ -389,7 +399,7 @@ function App() {
             <h1 className="text-xl font-bold">Roll Log</h1>
           </header>
           <div className="flex-1 overflow-y-auto p-4 space-y-4">
-            {rollLog.map(roll => {
+            {rollLog.filter(roll => roll && roll.groups && Array.isArray(roll.groups)).map(roll => {
               const totalModifier = roll.groups.reduce((sum, g) => sum + g.modifier, 0);
               const diceTotal = roll.total - totalModifier;
               return (
