@@ -1,0 +1,5 @@
+{
+  "name": "Uriah's Dice Roller",
+  "description": "A collaborative, real-time dice rolling application for tabletop RPGs, enhanced with AI features to suggest combo names and describe roll outcomes.",
+  "requestFramePermissions": []
+}
