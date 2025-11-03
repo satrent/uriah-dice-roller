@@ -73,21 +73,40 @@ For production, set `VITE_SOCKET_SERVER_URL` to your deployed backend URL.
 
 ## Deployment
 
-### Frontend (Client)
-The frontend can be deployed to:
+### Frontend (Client) - GitHub Pages
+
+The frontend is configured to deploy automatically to GitHub Pages via GitHub Actions.
+
+**Setup Steps:**
+1. Go to your GitHub repository → Settings → Pages
+2. Under "Source", select "GitHub Actions"
+3. The workflow will automatically deploy on pushes to `main` branch (when `client/` files change)
+
+**Configuration:**
+- The workflow is located at `.github/workflows/deploy.yml`
+- It automatically sets:
+  - `VITE_SOCKET_SERVER_URL`: Points to your Render API
+  - `VITE_BASE_PATH`: Set to `/uriah-dice-roller/` for GitHub Pages
+
+**Note:** If your GitHub Pages URL is different (e.g., custom domain or different repo name), update `VITE_BASE_PATH` in `.github/workflows/deploy.yml`
+
+**Alternative Deployments:**
+The frontend can also be deployed to:
 - Vercel
 - Netlify
 - Cloudflare Pages
 - Any static hosting service
 
-Build command: `npm run build` (in client directory)
+### Backend (Server) - Render
 
-### Backend (Server)
-The backend can be deployed to:
+The backend is configured for Render deployment.
+
+**Environment Variables (if needed):**
+- `PORT`: Automatically set by Render
+- `CORS_ORIGIN`: Set to your frontend URL (e.g., `https://username.github.io/uriah-dice-roller`) in Render's dashboard
+
+**Alternative Deployments:**
 - Railway
-- Render
 - Fly.io
 - DigitalOcean App Platform
 - Any Node.js hosting service
-
-Make sure to set the CORS origin to your frontend URL in production!
