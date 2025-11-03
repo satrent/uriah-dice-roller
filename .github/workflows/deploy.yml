@@ -20,6 +20,8 @@ concurrency:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    # Note: Make sure to configure environment protection rules in GitHub Settings
+    # Repository Settings → Environments → github-pages → Allow main branch
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
