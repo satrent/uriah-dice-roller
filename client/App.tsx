@@ -122,6 +122,7 @@ function App() {
   const [draggedGroupId, setDraggedGroupId] = useState<string | null>(null);
   const [dragOverGroupId, setDragOverGroupId] = useState<string | null>(null);
   const [linkCopied, setLinkCopied] = useState(false);
+  const [isDiceBagExpanded, setIsDiceBagExpanded] = useState(true);
 
   useEffect(() => {
     userRef.current = user;
@@ -318,11 +319,35 @@ function App() {
   return (
     <>
       {isRolling && rollingDice && <RollingAnimation dice={rollingDice} />}
-      <div className="flex flex-col md:flex-row h-screen font-sans">
+      <div className="flex flex-col lg:flex-row h-screen font-sans">
         {/* Left Panel */}
-        <div className="w-full md:w-96 bg-slate-800/50 border-r border-slate-700/50 p-4 flex flex-col gap-4">
+        <div className="w-full lg:w-96 bg-slate-800/50 border-r border-slate-700/50 p-4 flex flex-col gap-4 order-1 lg:order-1">
           
-          <div className="flex-grow flex flex-col min-h-0">
+          {/* Mobile: Collapsed view - just roll button with expand icon */}
+          {!isDiceBagExpanded && (
+            <div className="lg:hidden flex items-center gap-2">
+              <button
+                onClick={handlePlayerRoll}
+                disabled={tableGroups.length === 0 || isRolling}
+                className="flex-1 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg text-lg transition-transform transform active:scale-95"
+              >
+                {isRolling ? 'Rolling...' : `Roll (${totalDiceOnTable})`}
+              </button>
+              <button
+                onClick={() => setIsDiceBagExpanded(true)}
+                className="bg-slate-700/50 hover:bg-slate-700 p-3 rounded-lg transition-colors flex-shrink-0"
+                aria-label="Expand dice bag"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                </svg>
+              </button>
+            </div>
+          )}
+
+          {/* Expanded view */}
+          <div className={`${!isDiceBagExpanded ? 'hidden lg:flex' : 'flex'} flex-grow flex-col min-h-0`}>
+            <div className="flex-grow flex flex-col min-h-0">
             {/* On the Table */}
             <h2 className="text-lg font-bold text-cyan-400 mb-3 flex-shrink-0">On the Table</h2>
             <div className="bg-slate-900/70 rounded-lg p-3 flex-grow overflow-y-auto">
@@ -349,18 +374,30 @@ function App() {
                           )}
                           
                           <div className="flex items-center gap-2">
-                              <button onClick={() => updateGroup(group.id, { count: group.count - 1 })} className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-red-500/80 active:scale-95 flex-shrink-0">-</button>
+                              <button onClick={() => updateGroup(group.id, { count: group.count - 1 })} className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-red-500/80 active:scale-95 flex-shrink-0 touch-manipulation">-</button>
                               <span className="font-semibold text-cyan-400 text-lg w-20 text-center">{group.count}d{group.die}</span>
-                              <button onClick={() => updateGroup(group.id, { count: group.count + 1 })} className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-slate-700 active:scale-95 flex-shrink-0">+</button>
+                              <button onClick={() => updateGroup(group.id, { count: group.count + 1 })} className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-slate-700 active:scale-95 flex-shrink-0 touch-manipulation">+</button>
                           </div>
                           <div className="flex items-center gap-1">
                               <span className="text-xs text-slate-400">Mod:</span>
+                              <button 
+                                onClick={() => updateGroup(group.id, { modifier: group.modifier - 1 })} 
+                                className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-red-500/80 active:scale-95 flex-shrink-0 touch-manipulation"
+                              >
+                                -
+                              </button>
                               <input 
                                   type="number"
                                   value={group.modifier}
                                   onChange={e => updateGroup(group.id, { modifier: parseInt(e.target.value) || 0})}
                                   className="w-14 h-8 bg-slate-800 border border-slate-700 rounded-md text-center text-md font-bold focus:outline-none focus:ring-1 focus:ring-cyan-500"
                               />
+                              <button 
+                                onClick={() => updateGroup(group.id, { modifier: group.modifier + 1 })} 
+                                className="w-8 h-8 bg-slate-700/50 rounded-md text-lg font-bold transition-transform transform hover:scale-105 hover:bg-slate-700 active:scale-95 flex-shrink-0 touch-manipulation"
+                              >
+                                +
+                              </button>
                           </div>
                       </div>
                     ))}
@@ -383,18 +420,31 @@ function App() {
                 </button>
               ))}
             </div>
-            <button
-              onClick={handlePlayerRoll}
-              disabled={tableGroups.length === 0 || isRolling}
-              className="w-full mt-4 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg text-lg transition-transform transform active:scale-95"
-            >
-              {isRolling ? 'Rolling...' : `Roll (${totalDiceOnTable})`}
-            </button>
+            <div className="flex items-center gap-2 mt-4">
+              <button
+                onClick={handlePlayerRoll}
+                disabled={tableGroups.length === 0 || isRolling}
+                className="flex-1 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg text-lg transition-transform transform active:scale-95"
+              >
+                {isRolling ? 'Rolling...' : `Roll (${totalDiceOnTable})`}
+              </button>
+              {/* Collapse button next to roll button - only visible on mobile */}
+              <button
+                onClick={() => setIsDiceBagExpanded(false)}
+                className="lg:hidden bg-slate-700/50 hover:bg-slate-700 p-3 rounded-lg transition-colors flex-shrink-0"
+                aria-label="Collapse dice bag"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" />
+                </svg>
+              </button>
+            </div>
+          </div>
           </div>
         </div>
         
         {/* Center Panel (Roll Log) */}
-        <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden">
+        <div className="flex-1 flex flex-col bg-slate-900 overflow-hidden order-2 lg:order-2">
           <header className="p-4 border-b border-slate-700/50">
             <h1 className="text-xl font-bold">Roll Log</h1>
           </header>
@@ -443,7 +493,7 @@ function App() {
         </div>
 
         {/* Right Panel */}
-        <div className="w-full md:w-64 bg-slate-800/50 border-l border-slate-700/50 p-4 flex flex-col gap-6">
+        <div className="w-full lg:w-64 bg-slate-800/50 border-l border-slate-700/50 p-4 flex flex-col gap-6 order-3">
           <div>
             <h2 className="text-lg font-bold text-cyan-400 mb-3">Session Info</h2>
             <div className="bg-slate-700/50 p-3 rounded-lg">
