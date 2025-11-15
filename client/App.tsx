@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { io, Socket } from 'socket.io-client';
-import { DieType, Roll, User, RolledDiceGroup } from './types';
+import { DieType, Roll, User } from './types';
 import { DICE_OPTIONS } from './constants';
 
 const SOCKET_SERVER_URL = import.meta.env.VITE_SOCKET_SERVER_URL || 'http://localhost:3001';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3001';
 
 // --- HELPER FUNCTIONS ---
 const rollDie = (sides: DieType): number => Math.floor(Math.random() * sides) + 1; // Kept for animation only
@@ -19,17 +20,162 @@ interface TableDiceGroup {
 // --- UI COMPONENTS ---
 
 interface LoginScreenProps {
-  onLogin: (username: string) => void;
+  onAuthSuccess: (token: string, user: { id: string; email: string; firstName: string; lastName: string }) => void;
 }
 
-const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
-  const [name, setName] = useState('');
+type AuthStep = 'email' | 'register' | 'code';
 
-  const handleSubmit = (e: React.FormEvent) => {
+const LoginScreen: React.FC<LoginScreenProps> = ({ onAuthSuccess }) => {
+  const [step, setStep] = useState<AuthStep>('email');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [devCode, setDevCode] = useState('');
+  const [isRegistered, setIsRegistered] = useState<boolean | null>(null);
+
+  // Check if email is registered
+  const handleCheckEmail = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (name.trim()) {
-      onLogin(name.trim());
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/check-email`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email }),
+      });
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response received:', text.substring(0, 200));
+        throw new Error(`Server error (${response.status}). Make sure your backend server is running at ${API_BASE_URL}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to check email');
+      }
+
+      setIsRegistered(data.isRegistered);
+      
+      if (data.isRegistered) {
+        // User is registered, send code immediately
+        await handleSendCode();
+      } else {
+        // User is not registered, show registration form
+        setStep('register');
+      }
+    } catch (err: any) {
+      // Handle network errors
+      if (err.name === 'TypeError' && err.message.includes('fetch')) {
+        setError(`Cannot connect to server at ${API_BASE_URL}. Make sure your backend server is running.`);
+      } else {
+        setError(err.message || 'Failed to check email');
+      }
+      console.error('Error checking email:', err);
+    } finally {
+      setLoading(false);
     }
+  };
+
+  // Send login code
+  const handleSendCode = async () => {
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/request-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          email, 
+          ...(isRegistered === false && { firstName, lastName }) // Only include if not registered
+        }),
+      });
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response received:', text.substring(0, 200));
+        throw new Error(`Server error (${response.status}). Make sure your backend server is running at ${API_BASE_URL}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        if (data.requiresRegistration) {
+          setStep('register');
+          setError('');
+        } else {
+          throw new Error(data.error || 'Failed to send code');
+        }
+        return;
+      }
+
+      // Code sent successfully, move to code entry step
+      setStep('code');
+      if (data.devCode) {
+        setDevCode(data.devCode);
+      }
+    } catch (err: any) {
+      setError(err.message || 'Failed to send login code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setLoading(true);
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/auth/verify-code`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, code }),
+      });
+
+      // Check if response is JSON
+      const contentType = response.headers.get('content-type');
+      if (!contentType || !contentType.includes('application/json')) {
+        const text = await response.text();
+        console.error('Non-JSON response received:', text.substring(0, 200));
+        throw new Error(`Server error (${response.status}). Make sure your backend server is running at ${API_BASE_URL}`);
+      }
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Invalid code');
+      }
+
+      // Success! Store token and user info
+      localStorage.setItem('authToken', data.token);
+      localStorage.setItem('user', JSON.stringify(data.user));
+      onAuthSuccess(data.token, data.user);
+    } catch (err: any) {
+      setError(err.message || 'Failed to verify code');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleBackToEmail = () => {
+    setStep('email');
+    setCode('');
+    setError('');
+    setIsRegistered(null);
+    setFirstName('');
+    setLastName('');
   };
 
   return (
@@ -37,22 +183,113 @@ const LoginScreen: React.FC<LoginScreenProps> = ({ onLogin }) => {
       <div className="w-full max-w-md bg-slate-800 rounded-xl shadow-lg p-8">
         <h1 className="text-3xl font-bold text-center text-cyan-400 mb-2">Uriah's Dice Roller</h1>
         <p className="text-center text-slate-400 mb-8">Join a session and roll with friends</p>
-        <form onSubmit={handleSubmit}>
-          <input
-            type="text"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="Enter your name"
-            className="w-full bg-slate-700 border border-slate-600 rounded-md px-4 py-3 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition"
-          />
-          <button
-            type="submit"
-            disabled={!name.trim()}
-            className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-md mt-6 text-lg transition-transform transform active:scale-95"
-          >
-            Create or Join Session
-          </button>
-        </form>
+
+        {error && (
+          <div className="mb-4 p-3 bg-red-900/50 border border-red-700 rounded-md text-red-200 text-sm">
+            {error}
+          </div>
+        )}
+
+        {step === 'email' && (
+          <form onSubmit={handleCheckEmail}>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+              className="w-full bg-slate-700 border border-slate-600 rounded-md px-4 py-3 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition"
+              required
+            />
+            <button
+              type="submit"
+              disabled={!email.trim() || loading}
+              className="w-full bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-md mt-6 text-lg transition-transform transform active:scale-95"
+            >
+              {loading ? 'Checking...' : 'Continue'}
+            </button>
+          </form>
+        )}
+
+        {step === 'code' && (
+          <form onSubmit={handleVerifyCode}>
+            <p className="text-slate-300 mb-4 text-sm">
+              We sent a 6-digit code to <span className="font-semibold text-cyan-400">{email}</span>
+              <br />
+              <span className="text-slate-400 text-xs">Please check your email and enter the code below.</span>
+            </p>
+            {devCode && (
+              <div className="mb-4 p-3 bg-cyan-900/30 border border-cyan-700 rounded-md">
+                <p className="text-xs text-slate-400 mb-1">Dev Mode - Your code is:</p>
+                <p className="text-2xl font-bold text-cyan-400 text-center">{devCode}</p>
+              </div>
+            )}
+            <input
+              type="text"
+              value={code}
+              onChange={(e) => setCode(e.target.value.replace(/\D/g, '').slice(0, 6))}
+              placeholder="Enter 6-digit code"
+              className="w-full bg-slate-700 border border-slate-600 rounded-md px-4 py-3 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition text-center tracking-widest"
+              maxLength={6}
+              required
+            />
+            <div className="flex gap-2 mt-6">
+              <button
+                type="button"
+                onClick={handleBackToEmail}
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-4 rounded-md text-lg transition"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                disabled={code.length !== 6 || loading}
+                className="flex-1 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-md text-lg transition-transform transform active:scale-95"
+              >
+                {loading ? 'Verifying...' : 'Verify Code'}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {step === 'register' && (
+          <form onSubmit={(e) => { e.preventDefault(); handleSendCode(); }}>
+            <p className="text-slate-300 mb-4 text-sm">
+              New user detected. Please provide your name to complete registration.
+            </p>
+            <input
+              type="text"
+              value={firstName}
+              onChange={(e) => setFirstName(e.target.value)}
+              placeholder="First Name"
+              className="w-full bg-slate-700 border border-slate-600 rounded-md px-4 py-3 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition mb-4"
+              required
+            />
+            <input
+              type="text"
+              value={lastName}
+              onChange={(e) => setLastName(e.target.value)}
+              placeholder="Last Name"
+              className="w-full bg-slate-700 border border-slate-600 rounded-md px-4 py-3 text-lg text-slate-200 placeholder-slate-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 transition"
+              required
+            />
+            <div className="flex gap-2 mt-6">
+              <button
+                type="button"
+                onClick={handleBackToEmail}
+                className="flex-1 bg-slate-700 hover:bg-slate-600 text-white font-bold py-3 px-4 rounded-md text-lg transition"
+              >
+                Back
+              </button>
+              <button
+                type="submit"
+                disabled={!firstName.trim() || !lastName.trim() || loading}
+                className="flex-1 bg-cyan-600 hover:bg-cyan-500 disabled:bg-slate-700 disabled:cursor-not-allowed text-white font-bold py-3 px-4 rounded-md text-lg transition-transform transform active:scale-95"
+              >
+                {loading ? 'Sending Code...' : 'Send Login Code'}
+              </button>
+            </div>
+          </form>
+        )}
       </div>
     </div>
   );
@@ -108,6 +345,9 @@ const RollingAnimation: React.FC<{ dice: Partial<Record<DieType, number>> }> = (
 
 function App() {
   const socketRef = useRef<Socket | null>(null);
+  const [authToken, setAuthToken] = useState<string | null>(() => {
+    return localStorage.getItem('authToken');
+  });
   const [user, setUser] = useState<User | null>(null);
   const userRef = useRef<User | null>(null);
   const [users, setUsers] = useState<User[]>([]);
@@ -128,8 +368,15 @@ function App() {
     userRef.current = user;
   }, [user]);
 
+  // Initialize socket connection when authenticated
   useEffect(() => {
-    const socket = io(SOCKET_SERVER_URL);
+    if (!authToken) return;
+
+    const socket = io(SOCKET_SERVER_URL, {
+      auth: {
+        token: authToken
+      }
+    });
     socketRef.current = socket;
 
     socket.on('session_joined', ({ sessionID, users, self }) => {
@@ -144,7 +391,7 @@ function App() {
       setUser(prevUser => {
         if (!prevUser) return prevUser;
         // Find our user in the updated list to make sure we still have the latest data
-        const updatedSelf = updatedUsers.find(u => u.id === prevUser.id);
+        const updatedSelf = updatedUsers.find((u: User) => u.id === prevUser.id);
         return updatedSelf || prevUser;
       });
     });
@@ -194,17 +441,22 @@ function App() {
       }
     });
 
+    // Auto-join session when socket connects
+    socket.on('connect', () => {
+      const sessionIDFromUrl = window.location.hash.substring(1);
+      socket.emit('join_session', {
+        sessionID: sessionIDFromUrl || null,
+      });
+    });
+
     return () => {
       socket.disconnect();
     };
-  }, []);
+  }, [authToken]);
   
-  const handleLogin = (username: string) => {
-    const sessionIDFromUrl = window.location.hash.substring(1);
-    socketRef.current?.emit('join_session', {
-      username,
-      sessionID: sessionIDFromUrl || null,
-    });
+  const handleAuthSuccess = (token: string) => {
+    setAuthToken(token);
+    // Socket will reconnect automatically with the new token via useEffect
   };
   
   const handlePlayerRoll = () => {
@@ -312,8 +564,20 @@ function App() {
   };
 
 
+  if (!authToken) {
+    return <LoginScreen onAuthSuccess={handleAuthSuccess} />;
+  }
+
   if (!user) {
-    return <LoginScreen onLogin={handleLogin} />;
+    // Waiting for socket connection and session join
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900">
+        <div className="text-center">
+          <h2 className="text-2xl font-bold text-cyan-400 mb-4">Connecting...</h2>
+          <p className="text-slate-400">Joining session...</p>
+        </div>
+      </div>
+    );
   }
 
   return (
